@@ -16,15 +16,15 @@
     <section class="hero">
       <p class="eyebrow">YOUR SONG. YOUR WORDS. YOUR TIMING.</p>
       <h1>Every line,<br><span>right on time.</span></h1>
-      <p class="sub">Upload a track, add lyrics, and follow along. Automatic AI transcription will connect through the backend once configured.</p>
+      <p class="sub">Upload a track, add lyrics if you have them, and let LyricFlow attempt transcription and alignment.</p>
     </section>
 
     <section class="panel">
       <label class="upload" for="audioFile">
         <span class="upload-icon">↑</span>
         <strong>Choose an audio file</strong>
-        <span>MP3, WAV, M4A, or other browser-supported audio</span>
-        <input id="audioFile" type="file" accept="audio/*">
+        <span>MP3, WAV, M4A, FLAC, or OGG · maximum 25 MB</span>
+        <input id="audioFile" type="file" accept=".mp3,.wav,.m4a,.flac,.ogg,audio/*">
       </label>
       <div id="fileName" class="file-name">No song selected</div>
       <audio id="audio" controls></audio>
@@ -47,13 +47,14 @@
         </label>
       </div>
 
-      <label class="field lyrics-label" for="lyricsInput">Paste or edit lyrics <span>one line per row</span></label>
-      <textarea id="lyricsInput" rows="7" placeholder="Paste the song lyrics here, one line per row…"></textarea>
+      <label class="field lyrics-label" for="lyricsInput">Paste or edit lyrics <span>one line per row · optional</span></label>
+      <textarea id="lyricsInput" rows="7" placeholder="Paste lyrics here if you have them. Otherwise, leave blank to ask the backend to transcribe…"></textarea>
       <div class="button-row">
-        <button id="buildBtn" class="primary">Prepare synchronized lyrics</button>
-        <button id="clearBtn" class="secondary">Clear</button>
+        <button id="buildBtn" class="primary" type="button">Prepare synchronized lyrics</button>
+        <button id="clearBtn" class="secondary" type="button">Clear</button>
       </div>
-      <p class="hint">Privacy note: this starter runs in your browser for pasted lyrics. The selected audio is not uploaded anywhere by this page.</p>
+      <p id="status" class="hint" role="status" aria-live="polite">Choose an audio file. Processing may take several minutes and depends on the temporary backend being online.</p>
+      <p class="hint">Privacy: when you press Prepare, the selected audio and any lyrics you entered are uploaded to the configured backend for processing. Do not upload audio unless you have permission to use it.</p>
     </section>
 
     <section class="lyrics-panel">
@@ -62,12 +63,199 @@
         <span id="timeReadout" class="time">00:00</span>
       </div>
       <div id="lyricsView" class="lyrics-view">
-        <p class="empty">Choose a song and add lyrics to begin.</p>
+        <p class="empty">Choose a song and prepare lyrics to begin.</p>
       </div>
-      <p class="hint">Starter mode: lines are distributed across the track as a rough preview. Use the line timing controls to correct them. This is not AI-verified synchronization.</p>
+      <p class="hint">Timing and transcription can be wrong, especially for songs with background vocals, mixed languages, or unclear audio. Review the result before relying on it.</p>
     </section>
-    <footer>Built as an early beta. Lyrics and timing may need correction. Only upload audio you have permission to use.</footer>
+    <footer>LyricFlow early beta. Processing is best-effort; lyrics and timing may need correction.</footer>
   </main>
-  <script src="app.js"></script>
+
+<script>
+(() => {
+  // This is a temporary Cloudflare Quick Tunnel URL. It changes if the tunnel restarts.
+  const API_BASE = "https://owns-depot-attorney-ctl.trycloudflare.com";
+
+  const fileInput = document.getElementById("audioFile");
+  const fileName = document.getElementById("fileName");
+  const audio = document.getElementById("audio");
+  const language = document.getElementById("language");
+  const script = document.getElementById("script");
+  const lyricsInput = document.getElementById("lyricsInput");
+  const buildBtn = document.getElementById("buildBtn");
+  const clearBtn = document.getElementById("clearBtn");
+  const status = document.getElementById("status");
+  const lyricsView = document.getElementById("lyricsView");
+  const timeReadout = document.getElementById("timeReadout");
+
+  let audioUrl = null;
+  let lyricLines = [];
+
+  function setStatus(message) { status.textContent = message; }
+
+  function fmtTime(seconds) {
+    const s = Math.max(0, Number(seconds) || 0);
+    const m = Math.floor(s / 60);
+    const rest = Math.floor(s % 60);
+    return String(m).padStart(2, "0") + ":" + String(rest).padStart(2, "0");
+  }
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    fileName.textContent = file.name + " · " + (file.size / (1024 * 1024)).toFixed(1) + " MB";
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = URL.createObjectURL(file);
+    audio.src = audioUrl;
+    audio.load();
+    setStatus("Audio selected. Press Prepare synchronized lyrics to send it to the backend.");
+  });
+
+  function extractLines(result) {
+    // Accept several common segment formats returned by speech/transcription libraries.
+    const candidates = [
+      result?.segments, result?.lyrics?.segments, result?.alignment?.segments,
+      result?.data?.segments, result?.words
+    ];
+    for (const arr of candidates) {
+      if (Array.isArray(arr) && arr.length) {
+        const mapped = arr.map((item, i) => {
+          const text = String(item.text ?? item.word ?? item.line ?? "").trim();
+          const start = Number(item.start ?? item.start_time ?? item.startTime ?? 0);
+          const end = Number(item.end ?? item.end_time ?? item.endTime ?? start + 3);
+          return { text, start: Number.isFinite(start) ? start : i * 3,
+                   end: Number.isFinite(end) ? end : (i + 1) * 3 };
+        }).filter(x => x.text);
+        if (mapped.length) return mapped;
+      }
+    }
+
+    const textCandidates = [
+      result?.transcript, result?.text, result?.lyrics, result?.transcription,
+      result?.result?.text, result?.data?.text
+    ];
+    for (const val of textCandidates) {
+      if (typeof val === "string" && val.trim()) {
+        return val.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+          .map((text, i, arr) => ({ text, start: i * 3, end: (i + 1) * 3 }));
+      }
+    }
+    return [];
+  }
+
+  function renderLines(lines) {
+    lyricLines = lines;
+    lyricsView.replaceChildren();
+    if (!lines.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "The backend responded, but no readable lyric lines were found in its response.";
+      lyricsView.appendChild(p);
+      return;
+    }
+    lines.forEach((line, i) => {
+      const row = document.createElement("div");
+      row.className = "lyric-line";
+      row.dataset.index = String(i);
+      const text = document.createElement("span");
+      text.className = "lyric-text";
+      text.textContent = line.text;
+      const time = document.createElement("span");
+      time.className = "lyric-time";
+      time.textContent = fmtTime(line.start);
+      row.append(text, time);
+      row.title = "Click to seek to " + fmtTime(line.start);
+      row.addEventListener("click", () => { audio.currentTime = line.start; audio.play().catch(() => {}); });
+      lyricsView.appendChild(row);
+    });
+  }
+
+  function activeLine() {
+    const t = audio.currentTime || 0;
+    const idx = lyricLines.findIndex((line, i) =>
+      t >= line.start && (t < line.end || i === lyricLines.length - 1));
+    lyricsView.querySelectorAll(".lyric-line").forEach((el, i) => {
+      el.classList.toggle("active", i === idx);
+      if (i === idx) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+    timeReadout.textContent = fmtTime(t);
+  }
+  audio.addEventListener("timeupdate", activeLine);
+  audio.addEventListener("seeked", activeLine);
+
+  buildBtn.addEventListener("click", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) {
+      setStatus("Please choose an audio file first.");
+      fileInput.focus();
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      setStatus("This file is over 25 MB. Choose a smaller audio file.");
+      return;
+    }
+
+    const form = new FormData();
+    form.append("file", file);
+    form.append("lang", language.value);
+    form.append("lyrics", lyricsInput.value.trim());
+
+    buildBtn.disabled = true;
+    buildBtn.textContent = "Processing… please wait";
+    setStatus("Uploading audio and processing it. This may take several minutes. Keep this tab and the backend running.");
+    try {
+      const response = await fetch(API_BASE + "/api/process", { method: "POST", body: form });
+      const raw = await response.text();
+      let data;
+      try { data = JSON.parse(raw); } catch { data = { detail: raw }; }
+      if (!response.ok) {
+        const detail = data.detail || data.error || ("HTTP " + response.status);
+        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      }
+      const lines = extractLines(data);
+      if (!lines.length) {
+        console.log("LyricFlow backend response:", data);
+        setStatus("Backend responded, but its output format wasn't recognized. Open the browser console and share the response so I can map it correctly.");
+        renderLines([]);
+      } else {
+        renderLines(lines);
+        setStatus("Processing finished. Check the lyrics and timing; they may need correction.");
+        if (audio.paused) audio.play().catch(() => {});
+      }
+    } catch (err) {
+      console.error("LyricFlow request failed:", err);
+      const msg = String(err && err.message || err);
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        setStatus("Could not reach the backend. Check that the Colab API and Cloudflare tunnel are both running and that the tunnel URL is current.");
+      } else {
+        setStatus("Processing failed: " + msg);
+      }
+    } finally {
+      buildBtn.disabled = false;
+      buildBtn.textContent = "Prepare synchronized lyrics";
+    }
+  });
+
+  clearBtn.addEventListener("click", () => {
+    fileInput.value = "";
+    lyricsInput.value = "";
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = null;
+    fileName.textContent = "No song selected";
+    lyricLines = [];
+    lyricsView.innerHTML = '<p class="empty">Choose a song and prepare lyrics to begin.</p>';
+    timeReadout.textContent = "00:00";
+    setStatus("Cleared. Choose an audio file to start again.");
+  });
+
+  script.addEventListener("change", () => {
+    if (script.value !== "original") {
+      setStatus("Romanized lyrics and translations are display options only when the backend supplies those versions; this beta does not generate them separately yet.");
+    }
+  });
+})();
+</script>
 </body>
 </html>
