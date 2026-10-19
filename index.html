@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>LyricFlow — synchronized lyrics</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#"><span class="brand-mark">♫</span><span>LyricFlow</span></a>
+    <span class="beta">OPEN BETA</span>
+  </header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">YOUR SONG. YOUR WORDS. YOUR TIMING.</p>
+      <h1>Every line,<br><span>right on time.</span></h1>
+      <p class="sub">Upload a track, add lyrics, and follow along. Automatic AI transcription will connect through the backend once configured.</p>
+    </section>
+
+    <section class="panel">
+      <label class="upload" for="audioFile">
+        <span class="upload-icon">↑</span>
+        <strong>Choose an audio file</strong>
+        <span>MP3, WAV, M4A, or other browser-supported audio</span>
+        <input id="audioFile" type="file" accept="audio/*">
+      </label>
+      <div id="fileName" class="file-name">No song selected</div>
+      <audio id="audio" controls></audio>
+
+      <div class="controls-row">
+        <label class="field">Lyrics language
+          <select id="language">
+            <option value="auto">Auto / mixed</option>
+            <option value="te">Telugu</option>
+            <option value="hi">Hindi</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <label class="field">Display
+          <select id="script">
+            <option value="original">Original lyrics</option>
+            <option value="roman">Romanized lyrics (if provided)</option>
+            <option value="translation">Translation (if provided)</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="field lyrics-label" for="lyricsInput">Paste or edit lyrics <span>one line per row</span></label>
+      <textarea id="lyricsInput" rows="7" placeholder="Paste the song lyrics here, one line per row…"></textarea>
+      <div class="button-row">
+        <button id="buildBtn" class="primary">Prepare synchronized lyrics</button>
+        <button id="clearBtn" class="secondary">Clear</button>
+      </div>
+      <p class="hint">Privacy note: this starter runs in your browser for pasted lyrics. The selected audio is not uploaded anywhere by this page.</p>
+    </section>
+
+    <section class="lyrics-panel">
+      <div class="lyrics-head">
+        <div><p class="eyebrow">NOW PLAYING</p><h2>Lyrics</h2></div>
+        <span id="timeReadout" class="time">00:00</span>
+      </div>
+      <div id="lyricsView" class="lyrics-view">
+        <p class="empty">Choose a song and add lyrics to begin.</p>
+      </div>
+      <p class="hint">Starter mode: lines are distributed across the track as a rough preview. Use the line timing controls to correct them. This is not AI-verified synchronization.</p>
+    </section>
+    <footer>Built as an early beta. Lyrics and timing may need correction. Only upload audio you have permission to use.</footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
